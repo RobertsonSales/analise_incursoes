@@ -235,7 +235,6 @@
             display: none;
         }
 
-        /* Centralização dos cards de estatísticas */
         .stats-grid {
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
@@ -513,7 +512,6 @@
             border: 1px solid var(--success);
         }
 
-        /* Modal para detalhes da área */
         .modal {
             display: none;
             position: fixed;
@@ -701,7 +699,6 @@
             animation: fadeIn 0.8s ease-out 1s both;
         }
 
-        /* Estilos para impressão */
         @media print {
             body {
                 background: white !important;
@@ -766,7 +763,6 @@
                 color: #333 !important;
             }
             
-            /* Layout específico do relatório de impressão */
             .print-report {
                 display: block !important;
             }
@@ -809,7 +805,6 @@
             }
         }
 
-        /* Estilos específicos para Denúncias */
         .denuncia-grid {
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
@@ -877,6 +872,22 @@
             font-size: 0.9rem;
             max-width: 300px;
             width: 100%;
+        }
+
+        .duplicate-metrics {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 0.5rem;
+            margin-top: 0.5rem;
+        }
+
+        .duplicate-metric {
+            font-size: 0.85rem;
+            color: var(--text-muted);
+        }
+
+        .duplicate-metric strong {
+            color: var(--text);
         }
     </style>
 </head>
@@ -1071,6 +1082,22 @@
         </div>
     </div>
 
+    <!-- Modal para detalhes de duplicados -->
+    <div id="duplicatesModal" class="modal">
+        <div class="modal-content" style="max-width: 900px;">
+            <div class="modal-header">
+                <h2 class="modal-title">Detalhes de Registros Duplicados</h2>
+                <span class="close-modal" id="closeDuplicatesModalBtn">&times;</span>
+            </div>
+            <div class="modal-body">
+                <p style="margin-bottom: 1.5rem; color: var(--text-muted);">Lista de endereços com múltiplas denúncias e seus respectivos números de DD.</p>
+                <div id="duplicatesList" style="display: flex; flex-direction: column; gap: 1.5rem;">
+                    <!-- Conteúdo dinâmico -->
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- Modal Preview PDF -->
     <div id="pdfPreviewModal" class="modal">
         <div class="modal-content" style="max-width: 95%; max-height: 90%;">
@@ -1102,20 +1129,17 @@
 
         // Inicialização
         document.addEventListener('DOMContentLoaded', function() {
-            // Configurar botões de modo
             document.getElementById('btnIncursao').addEventListener('click', () => switchMode('incursao'));
             document.getElementById('btnDenuncia').addEventListener('click', () => switchMode('denuncia'));
             
-            // Configurar uploads
             document.getElementById('fileInputIncursao').addEventListener('change', handleFileIncursao);
             document.getElementById('fileInputDenuncia').addEventListener('change', handleFileDenuncia);
             
-            // Configurar modais
             document.getElementById('closeModal').addEventListener('click', closeModal);
             document.getElementById('closeCidadesModal').addEventListener('click', closeCidadesModal);
+            document.getElementById('closeDuplicatesModalBtn').addEventListener('click', closeDuplicatesModal);
             document.getElementById('closePdfPreview').addEventListener('click', closePdfPreview);
             
-            // Fechar modais ao clicar fora
             document.getElementById('areaModal').addEventListener('click', function(e) {
                 if (e.target === this) closeModal();
             });
@@ -1123,12 +1147,15 @@
             document.getElementById('cidadesModal').addEventListener('click', function(e) {
                 if (e.target === this) closeCidadesModal();
             });
+
+            document.getElementById('duplicatesModal').addEventListener('click', function(e) {
+                if (e.target === this) closeDuplicatesModal();
+            });
             
             document.getElementById('pdfPreviewModal').addEventListener('click', function(e) {
                 if (e.target === this) closePdfPreview();
             });
 
-            // Alternar entre abas do modal
             document.querySelectorAll('.modal-tab').forEach(tab => {
                 tab.addEventListener('click', function() {
                     const tabId = this.getAttribute('data-tab');
@@ -1153,11 +1180,9 @@
         function switchMode(mode) {
             currentMode = mode;
             
-            // Atualizar botões
             document.querySelectorAll('.mode-btn').forEach(btn => btn.classList.remove('active'));
             document.getElementById(`btn${mode.charAt(0).toUpperCase() + mode.slice(1)}`).classList.add('active');
             
-            // Mostrar/ocultar seções
             document.getElementById('uploadSectionIncursao').style.display = mode === 'incursao' ? 'block' : 'none';
             document.getElementById('uploadSectionDenuncia').style.display = mode === 'denuncia' ? 'block' : 'none';
             
@@ -1629,8 +1654,20 @@
             const materialCounts = {};
             const statusCounts = {};
             const faccaoCounts = {};
+            const duplicateMap = new Map();
 
             denuncias.forEach(item => {
+                // Identificar duplicados por Endereço
+                const endereco = (item['Endereço'] || '').toString().trim().toUpperCase();
+                const key = endereco;
+                
+                if (endereco && endereco !== 'NI') {
+                    if (!duplicateMap.has(key)) {
+                        duplicateMap.set(key, []);
+                    }
+                    duplicateMap.get(key).push(item);
+                }
+
                 // Cidade
                 const cidade = item['Cidade'] || 'Desconhecida';
                 cidadeCounts[cidade] = (cidadeCounts[cidade] || 0) + 1;
@@ -1693,6 +1730,21 @@
                 .sort((a, b) => b[1] - a[1])
                 .slice(0, 10);
 
+            // Cálculo das métricas de duplicados
+            let totalEnderecosUnicos = 0;
+            let totalEnderecosReincidentes = 0;
+            let totalRegistrosAfetados = 0;
+
+            duplicateMap.forEach((items, key) => {
+                if (key && key !== 'NI') {
+                    totalEnderecosUnicos++;
+                    if (items.length > 1) {
+                        totalEnderecosReincidentes++;
+                        totalRegistrosAfetados += items.length;
+                    }
+                }
+            });
+
             denunciasData = {
                 denuncias: denuncias,
                 total: total,
@@ -1706,7 +1758,12 @@
                 fixas: fixas,
                 moveis: moveis,
                 topMateriais: topMateriais,
-                topStatus: topStatus
+                topStatus: topStatus,
+                duplicateMap: duplicateMap,
+                // Novas métricas
+                totalEnderecosUnicos: totalEnderecosUnicos,
+                totalEnderecosReincidentes: totalEnderecosReincidentes,
+                totalRegistrosAfetados: totalRegistrosAfetados
             };
 
             // Popular filtro de cidades
@@ -1733,8 +1790,19 @@
             const materialCounts = {};
             const statusCounts = {};
             const faccaoCounts = {};
+            const currentDuplicateMap = new Map();
 
             filteredData.forEach(item => {
+                const endereco = (item['Endereço'] || '').toString().trim().toUpperCase();
+                const key = endereco;
+                
+                if (endereco && endereco !== 'NI') {
+                    if (!currentDuplicateMap.has(key)) {
+                        currentDuplicateMap.set(key, []);
+                    }
+                    currentDuplicateMap.get(key).push(item);
+                }
+
                 const tipo = item['Tipo de Barricada'] || 'Desconhecido';
                 tipoCounts[tipo] = (tipoCounts[tipo] || 0) + 1;
 
@@ -1777,6 +1845,21 @@
                 .sort((a, b) => b[1] - a[1])
                 .slice(0, 10);
 
+            // Calcular métricas de duplicados para dados filtrados
+            let totalEnderecosUnicosFiltrados = 0;
+            let totalEnderecosReincidentesFiltrados = 0;
+            let totalRegistrosAfetadosFiltrados = 0;
+
+            currentDuplicateMap.forEach((items, key) => {
+                if (key && key !== 'NI') {
+                    totalEnderecosUnicosFiltrados++;
+                    if (items.length > 1) {
+                        totalEnderecosReincidentesFiltrados++;
+                        totalRegistrosAfetadosFiltrados += items.length;
+                    }
+                }
+            });
+
             // Atualizar estatísticas
             const statsGrid = document.getElementById('denunciaStatsGrid');
             const fixasPct = total > 0 ? ((fixas / total) * 100).toFixed(1) : 0;
@@ -1809,6 +1892,18 @@
                     <div class="denuncia-card-header">🏴 Facção Mais Citada</div>
                     <div class="denuncia-card-value">${faccaoMaisCitada[0]}</div>
                     <div class="stat-change neutral">${faccaoMaisCitada[1]} menções</div>
+                </div>
+                
+                <div class="denuncia-card" onclick="showDuplicatesModal()" style="cursor: pointer; transition: transform 0.2s;">
+                    <div class="denuncia-card-header">🔄 Registros Duplicados</div>
+                    <div class="denuncia-card-value">${totalEnderecosReincidentesFiltrados}</div>
+                    <div class="stat-change negative">${totalRegistrosAfetadosFiltrados} registros afetados</div>
+                    <div class="duplicate-metrics">
+                        <div class="duplicate-metric">Endereços únicos: <strong>${totalEnderecosUnicosFiltrados}</strong></div>
+                        <div class="duplicate-metric">Endereços com reincidência: <strong>${totalEnderecosReincidentesFiltrados}</strong></div>
+                        <div class="duplicate-metric">Total de registros afetados: <strong>${totalRegistrosAfetadosFiltrados}</strong></div>
+                    </div>
+                    <button class="btn" style="margin-top: 1rem; width: 100%;">Ver Detalhes</button>
                 </div>
                 
                 <div class="denuncia-card">
@@ -1986,6 +2081,64 @@
             document.getElementById('cidadesModal').style.display = 'none';
         }
 
+        function showDuplicatesModal() {
+            const container = document.getElementById('duplicatesList');
+            const cidade = document.getElementById('cidadeFilter').value;
+            
+            // Filtrar dados novamente para garantir consistência com o dashboard
+            const filteredData = cidade ? 
+                denunciasData.denuncias.filter(d => d['Cidade'] === cidade) : 
+                denunciasData.denuncias;
+
+            const currentDuplicateMap = new Map();
+            filteredData.forEach(item => {
+                const endereco = (item['Endereço'] || '').toString().trim().toUpperCase();
+                if (endereco && endereco !== 'NI') {
+                    if (!currentDuplicateMap.has(endereco)) {
+                        currentDuplicateMap.set(endereco, []);
+                    }
+                    currentDuplicateMap.get(endereco).push(item);
+                }
+            });
+
+            const duplicates = [];
+            currentDuplicateMap.forEach((items, endereco) => {
+                if (items.length > 1) {
+                    duplicates.push({ endereco, items });
+                }
+            });
+
+            // Ordenar por número de ocorrências
+            duplicates.sort((a, b) => b.items.length - a.items.length);
+
+            if (duplicates.length === 0) {
+                container.innerHTML = '<div style="text-align: center; padding: 2rem; color: var(--text-muted);">Nenhuma duplicidade encontrada para os filtros atuais.</div>';
+            } else {
+                container.innerHTML = duplicates.map(dup => {
+                    // Extrair os números de DD de cada item
+                    const numerosDD = dup.items.map(item => item['N° DD'] || 'N/A').join(', ');
+                    return `
+                        <div style="background: var(--surface-light); padding: 1.5rem; border-radius: 12px; border-left: 4px solid var(--danger);">
+                            <div style="font-weight: 700; color: var(--text); margin-bottom: 0.5rem; font-size: 1.1rem;">📍 ${dup.endereco}</div>
+                            <div style="color: var(--text-muted); font-size: 0.9rem; margin-bottom: 0.8rem;">
+                                <strong>Ocorrências:</strong> ${dup.items.length} denúncias neste endereço
+                            </div>
+                            <div style="background: rgba(0,0,0,0.2); padding: 1rem; border-radius: 8px;">
+                                <div style="font-size: 0.8rem; text-transform: uppercase; color: var(--accent); font-weight: 700; margin-bottom: 0.5rem;">Números de DD Relacionados:</div>
+                                <div style="font-family: 'Space Mono', monospace; color: var(--text); word-break: break-all;">${numerosDD}</div>
+                            </div>
+                        </div>
+                    `;
+                }).join('');
+            }
+            
+            document.getElementById('duplicatesModal').style.display = 'block';
+        }
+
+        function closeDuplicatesModal() {
+            document.getElementById('duplicatesModal').style.display = 'none';
+        }
+
         function closePdfPreview() {
             document.getElementById('pdfPreviewModal').style.display = 'none';
             document.getElementById('pdfPreviewIframe').src = '';
@@ -2002,7 +2155,7 @@
             }
         }
 
-        // ======================= FUNÇÕES DE EXPORTAÇÃO PARA DENÚNCIAS =======================
+        // ======================= FUNÇÕES DE EXPORTAÇÃO =======================
         function generateDenunciasPDFContent() {
             const { jsPDF } = window.jspdf;
             const pdf = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
@@ -2039,59 +2192,39 @@
             const total = filteredData.length;
             
             // Recalcular para dados filtrados
-            const tipoCounts = {};
-            const materialCounts = {};
-            const statusCounts = {};
-            const faccaoCounts = {};
-
+            const currentDuplicateMap = new Map();
             filteredData.forEach(item => {
-                const tipo = item['Tipo de Barricada'] || 'Desconhecido';
-                tipoCounts[tipo] = (tipoCounts[tipo] || 0) + 1;
-
-                const materiais = [
-                    item['Material 1'],
-                    item['Material 2'],
-                    item['Material 3']
-                ].filter(m => m && m !== 'NI' && m.trim() !== '');
+                const endereco = (item['Endereço'] || '').toString().trim().toUpperCase();
+                const key = endereco;
                 
-                materiais.forEach(mat => {
-                    const material = mat.trim().toUpperCase();
-                    materialCounts[material] = (materialCounts[material] || 0) + 1;
-                });
-
-                const status = item['Status'] || 'Sem Tratamento';
-                statusCounts[status] = (statusCounts[status] || 0) + 1;
-
-                const obs = (item['Observações'] || '').toLowerCase();
-                const denuncia = (item['Denúncia'] || '').toLowerCase();
-                const textoCompleto = obs + ' ' + denuncia;
-                
-                if (textoCompleto.includes('comando vermelho') || textoCompleto.includes('cv')) {
-                    faccaoCounts['COMANDO VERMELHO'] = (faccaoCounts['COMANDO VERMELHO'] || 0) + 1;
-                }
-                if (textoCompleto.includes('terceiro comando') || textoCompleto.includes('tcp')) {
-                    faccaoCounts['TERCEIRO COMANDO PURO'] = (faccaoCounts['TERCEIRO COMANDO PURO'] || 0) + 1;
+                if (endereco && endereco !== 'NI') {
+                    if (!currentDuplicateMap.has(key)) {
+                        currentDuplicateMap.set(key, []);
+                    }
+                    currentDuplicateMap.get(key).push(item);
                 }
             });
 
-            const faccaoMaisCitada = Object.entries(faccaoCounts).sort((a, b) => b[1] - a[1])[0] || ['Nenhuma', 0];
-            
-            let fixas = 0;
-            let moveis = 0;
-            Object.entries(tipoCounts).forEach(([tipo, count]) => {
-                if (tipo.toUpperCase().includes('FIXA')) fixas += count;
-                if (tipo.toUpperCase().includes('MÓVEL') || tipo.toUpperCase().includes('MOVEIS')) moveis += count;
-            });
+            // Calcular métricas de duplicados para o PDF
+            let totalEnderecosUnicosFiltrados = 0;
+            let totalEnderecosReincidentesFiltrados = 0;
+            let totalRegistrosAfetadosFiltrados = 0;
 
-            const fixasPct = total > 0 ? ((fixas / total) * 100).toFixed(1) : 0;
-            const moveisPct = total > 0 ? ((moveis / total) * 100).toFixed(1) : 0;
+            currentDuplicateMap.forEach((items, key) => {
+                if (key && key !== 'NI') {
+                    totalEnderecosUnicosFiltrados++;
+                    if (items.length > 1) {
+                        totalEnderecosReincidentesFiltrados++;
+                        totalRegistrosAfetadosFiltrados += items.length;
+                    }
+                }
+            });
 
             const insights = [
                 `Total de denúncias analisadas: ${total}`,
-                `Cidade mais afetada: ${denunciasData.cidadeMaisAfetada ? denunciasData.cidadeMaisAfetada[0] : 'N/A'} com ${denunciasData.cidadeMaisAfetada ? denunciasData.cidadeMaisAfetada[1] : 0} denúncias`,
-                `Barricadas fixas representam ${fixasPct}% do total – indicam controle mais permanente do território.`,
-                `Barricadas móveis representam ${moveisPct}% do total – sugerem táticas de rápido reposicionamento.`,
-                `Facção mais citada: ${faccaoMaisCitada[0]} (${faccaoMaisCitada[1]} menções) – sugere domínio de uma organização específica.`,
+                `Total de endereços únicos (barricadas recolocadas): ${totalEnderecosUnicosFiltrados}`,
+                `Endereços com reincidência (mencionados mais de uma vez): ${totalEnderecosReincidentesFiltrados}`,
+                `Total de registros afetados por reincidência: ${totalRegistrosAfetadosFiltrados}`,
                 `A rápida recolocação após remoções policiais destaca a resiliência das estruturas criminosas e a necessidade de estratégias mais sustentáveis de intervenção.`
             ];
 
@@ -2108,16 +2241,64 @@
 
             y += 10;
 
+            // Seção Detalhes de Duplicados
+            if (totalEnderecosReincidentesFiltrados > 0) {
+                pdf.setFontSize(14);
+                pdf.text('Endereços com Reincidência de Denúncias', margin, y);
+                y += 10;
+
+                const duplicatesList = [];
+                currentDuplicateMap.forEach((items, endereco) => {
+                    if (items.length > 1 && endereco && endereco !== 'NI') {
+                        const numerosDD = items.map(item => item['N° DD'] || 'N/A').join(', ');
+                        duplicatesList.push([endereco, items.length, numerosDD]);
+                    }
+                });
+
+                duplicatesList.sort((a, b) => b[1] - a[1]);
+
+                pdf.autoTable({
+                    startY: y,
+                    head: [['Endereço', 'Ocorrências', 'Números de DD']],
+                    body: duplicatesList.slice(0, 15),
+                    theme: 'grid',
+                    headStyles: { fillColor: [239, 68, 68], textColor: 255 },
+                    styles: { fontSize: 9, cellPadding: 3, overflow: 'linebreak', valign: 'middle' },
+                    columnStyles: { 
+                        0: { cellWidth: 70 },
+                        1: { cellWidth: 25 },
+                        2: { cellWidth: 95 }
+                    },
+                    margin: { left: margin, right: margin }
+                });
+                
+                y = pdf.lastAutoTable.finalY + 15;
+            }
+
             // Seção Materiais
             pdf.setFontSize(14);
-            const materialsTitle = 'Materiais Mais Usados (Ranking Completo)';
-            const titleLines = pdf.splitTextToSize(materialsTitle, maxLineWidth);
-            pdf.text(titleLines, margin, y);
-            y += titleLines.length * 8 + 5;
+            const materialsTitle = 'Materiais Mais Usados';
+            pdf.text(materialsTitle, margin, y);
+            y += 10;
+
+            // Recalcular materiais para dados filtrados
+            const materialCounts = {};
+            filteredData.forEach(item => {
+                const materiais = [
+                    item['Material 1'],
+                    item['Material 2'],
+                    item['Material 3']
+                ].filter(m => m && m !== 'NI' && m.trim() !== '');
+                
+                materiais.forEach(mat => {
+                    const material = mat.trim().toUpperCase();
+                    materialCounts[material] = (materialCounts[material] || 0) + 1;
+                });
+            });
 
             const mats = Object.entries(materialCounts)
                 .sort((a, b) => b[1] - a[1])
-                .slice(0, 15);
+                .slice(0, 10);
                 
             const matTable = mats.map(([mat, cnt], i) => [i+1, mat, cnt]);
             pdf.autoTable({
@@ -2128,63 +2309,6 @@
                 headStyles: { fillColor: [0, 198, 255], textColor: 255 },
                 styles: { fontSize: 10, cellPadding: 4, overflow: 'linebreak', valign: 'middle' },
                 columnStyles: { 0: { cellWidth: 30 }, 1: { cellWidth: 'auto' }, 2: { cellWidth: 40 } },
-                margin: { left: margin, right: margin }
-            });
-            y = pdf.lastAutoTable.finalY + 15;
-            if (y > pdf.internal.pageSize.getHeight() - 30) {
-                pdf.addPage();
-                y = 20;
-            }
-
-            // Seção Status
-            pdf.setFontSize(14);
-            pdf.text('Status das Denúncias', margin, y);
-            y += 10;
-            
-            const statusTable = Object.entries(statusCounts)
-                .sort((a, b) => b[1] - a[1])
-                .map(([st, cnt]) => [st || 'SEM TRATAMENTO', cnt]);
-                
-            pdf.autoTable({
-                startY: y,
-                head: [['Status', 'Quantidade']],
-                body: statusTable,
-                theme: 'grid',
-                headStyles: { fillColor: [102, 126, 234], textColor: 255 },
-                styles: { fontSize: 10, cellPadding: 4, overflow: 'linebreak' },
-                columnStyles: { 0: { cellWidth: 180 }, 1: { cellWidth: 40 } },
-                margin: { left: margin, right: margin }
-            });
-
-            y = pdf.lastAutoTable.finalY + 15;
-            if (y > pdf.internal.pageSize.getHeight() - 30) {
-                pdf.addPage();
-                y = 20;
-            }
-
-            // Seção Ranking de Cidades
-            pdf.setFontSize(14);
-            pdf.text('Ranking Completo de Cidades', margin, y);
-            y += 10;
-            
-            const cidadeCounts = {};
-            filteredData.forEach(item => {
-                const cidade = item['Cidade'] || 'Desconhecida';
-                cidadeCounts[cidade] = (cidadeCounts[cidade] || 0) + 1;
-            });
-            
-            const cidadeTable = Object.entries(cidadeCounts)
-                .sort((a, b) => b[1] - a[1])
-                .map(([cidade, cnt], idx) => [idx+1, cidade, cnt, total > 0 ? ((cnt/total)*100).toFixed(1) + '%' : '0%']);
-                
-            pdf.autoTable({
-                startY: y,
-                head: [['#', 'Cidade', 'Denúncias', '%']],
-                body: cidadeTable,
-                theme: 'grid',
-                headStyles: { fillColor: [78, 84, 200], textColor: 255 },
-                styles: { fontSize: 10, cellPadding: 4, overflow: 'linebreak' },
-                columnStyles: { 0: { cellWidth: 20 }, 1: { cellWidth: 100 }, 2: { cellWidth: 40 }, 3: { cellWidth: 30 } },
                 margin: { left: margin, right: margin }
             });
 
@@ -2217,7 +2341,6 @@
             pdf.save(`relatorio_denuncias_${new Date().toISOString().split('T')[0]}.pdf`);
         }
 
-        // ======================= FUNÇÕES DE EXPORTAÇÃO PARA INCURSÕES =======================
         function exportToPDF(type) {
             if (type === 'incursao') {
                 exportIncursaoPDF();
@@ -2232,13 +2355,14 @@
                 return;
             }
             
-            // Aqui você deve manter o código original de exportToPDF da aplicação de incursões
-            // Como é muito extenso, mantive apenas a chamada básica
             const { jsPDF } = window.jspdf;
             const pdf = new jsPDF('landscape', 'mm', 'a4');
             
-            // Adicione aqui o código completo da função exportToPDF original
-            // ... [código original da exportToPDF] ...
+            // Implementação básica - expandir conforme necessário
+            pdf.text('Relatório de Incursões', 20, 20);
+            pdf.text(`Total de Áreas: ${analysisData.totalAreas}`, 20, 30);
+            pdf.text(`Total de Endereços: ${analysisData.totalAddresses}`, 20, 40);
+            pdf.text(`Endereços Duplicados: ${analysisData.totalDuplicates}`, 20, 50);
             
             pdf.save(`relatorio_incursao_${new Date().toISOString().split('T')[0]}.pdf`);
         }
