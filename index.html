@@ -813,6 +813,7 @@
         }
 
         .denuncia-card {
+            text-align: center;
             background: var(--surface);
             border-radius: 16px;
             padding: 1.8rem;
@@ -882,7 +883,8 @@
         }
 
         .duplicate-metric {
-            font-size: 0.85rem;
+            font-size: 1.1rem;
+            margin-bottom: 0.5rem;
             color: var(--text-muted);
         }
 
@@ -921,7 +923,7 @@
             <div class="upload-icon">⚠️</div>
             <h2 style="margin-bottom: 1rem;">Importar Planilha de Denúncias</h2>
             <p style="color: var(--text-muted); margin-bottom: 1.5rem;">
-                Selecione um arquivo .xlsx com a aba "Recolocação.DD" para análise
+                Selecione um arquivo .xlsx com as abas "Recolocação.DD" e "GLOBAL" para análise
             </p>
             <input type="file" id="fileInputDenuncia" accept=".xlsx">
             <label for="fileInputDenuncia" class="btn">
@@ -1085,12 +1087,15 @@
     <!-- Modal para detalhes de duplicados -->
     <div id="duplicatesModal" class="modal">
         <div class="modal-content" style="max-width: 900px;">
-            <div class="modal-header">
+            <div class="modal-header" style="display: flex; justify-content: space-between; align-items: center;">
                 <h2 class="modal-title">Detalhes de Registros Duplicados</h2>
-                <span class="close-modal" id="closeDuplicatesModalBtn">&times;</span>
+                <div style="display: flex; gap: 1rem; align-items: center;">
+                    <button class="btn" onclick="generateRecolocacoesPDF()" style="padding: 0.5rem 1rem; font-size: 0.85rem;">📄 Exportar PDF</button>
+                    <span class="close-modal" id="closeDuplicatesModalBtn" style="position: static;">&times;</span>
+                </div>
             </div>
             <div class="modal-body">
-                <p style="margin-bottom: 1.5rem; color: var(--text-muted);">Lista de endereços com múltiplas denúncias e seus respectivos números de DD.</p>
+                <p style="margin-bottom: 1.5rem; color: var(--text-muted);">Lista de endereços com múltiplas denúncias e seus respectivos números de Registro:</p>
                 <div id="duplicatesList" style="display: flex; flex-direction: column; gap: 1.5rem;">
                     <!-- Conteúdo dinâmico -->
                 </div>
@@ -1126,6 +1131,7 @@
         let currentAreaDetails = null;
         let currentMode = 'incursao';
         let currentPDFDataUrl = '';
+        let totalRemocoesGlobal = 0;
 
         // Inicialização
         document.addEventListener('DOMContentLoaded', function() {
@@ -1613,14 +1619,25 @@
                     const data = new Uint8Array(e.target.result);
                     const workbook = XLSX.read(data, { type: 'array' });
                     
+                    // Verificar se ambas as abas existem
                     if (!workbook.SheetNames.includes('Recolocação.DD')) {
                         throw new Error('A planilha não contém a aba "Recolocação.DD". Por favor, verifique o arquivo.');
                     }
                     
-                    const worksheet = workbook.Sheets['Recolocação.DD'];
-                    const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+                    if (!workbook.SheetNames.includes('GLOBAL')) {
+                        throw new Error('A planilha não contém a aba "GLOBAL". Por favor, verifique o arquivo.');
+                    }
                     
-                    processDenunciaData(jsonData);
+                    // Processar aba GLOBAL para obter total de remoções
+                    const globalWorksheet = workbook.Sheets['GLOBAL'];
+                    const globalData = XLSX.utils.sheet_to_json(globalWorksheet, { header: 1 });
+                    const totalRemocoes = processGlobalData(globalData);
+                    
+                    // Processar aba Recolocação.DD
+                    const recolocacaoWorksheet = workbook.Sheets['Recolocação.DD'];
+                    const recolocacaoData = XLSX.utils.sheet_to_json(recolocacaoWorksheet, { header: 1 });
+                    
+                    processDenunciaData(recolocacaoData, totalRemocoes);
                     setTimeout(() => {
                         document.getElementById('loading').classList.remove('active');
                         document.getElementById('dashboard-denuncia').style.display = 'block';
@@ -1636,7 +1653,51 @@
             reader.readAsArrayBuffer(file);
         }
 
-        function processDenunciaData(data) {
+        function processGlobalData(data) {
+            // A coluna "REMOÇÕES" está no índice 5 (coluna F, se começar em 0)
+            const REMOCOES_INDEX = 5;
+            
+            if (!data || data.length === 0) {
+                console.warn('A aba GLOBAL está vazia ou não contém dados.');
+                return 0;
+            }
+            
+            // Verificar se há dados suficientes
+            if (data.length < 2) {
+                console.warn('A aba GLOBAL não contém dados suficientes.');
+                return 0;
+            }
+            
+            // Pular cabeçalho e somar valores da coluna 5
+            let totalRemocoes = 0;
+            for (let i = 1; i < data.length; i++) {
+                const row = data[i];
+                if (row && row.length > REMOCOES_INDEX) {
+                    const valor = row[REMOCOES_INDEX];
+                    
+                    // Converter para número se possível
+                    if (valor !== undefined && valor !== null && valor !== '') {
+                        const num = Number(valor);
+                        if (!isNaN(num)) {
+                            totalRemocoes += num;
+                        } else {
+                            // Tentar extrair número de string
+                            const match = String(valor).match(/\d+/);
+                            if (match) {
+                                totalRemocoes += Number(match[0]);
+                            }
+                        }
+                    }
+                }
+            }
+            
+            console.log(`Total de remoções encontrado na aba GLOBAL (índice ${REMOCOES_INDEX}):`, totalRemocoes);
+            return totalRemocoes;
+        }
+
+        function processDenunciaData(data, totalRemocoes) {
+            totalRemocoesGlobal = totalRemocoes;
+            
             const headers = data[0];
             const rows = data.slice(1);
 
@@ -1646,6 +1707,9 @@
                     obj[header] = row[index] || '';
                 });
                 return obj;
+            }).filter(item => {
+                const endereco = (item['Endereço'] || '').toString().trim();
+                return endereco !== '' && endereco.toUpperCase() !== 'NI';
             });
 
             // Contagem por cidade
@@ -1669,7 +1733,7 @@
                 }
 
                 // Cidade
-                const cidade = item['Cidade'] || 'Desconhecida';
+                const cidade = item['Cidade'] || '';
                 cidadeCounts[cidade] = (cidadeCounts[cidade] || 0) + 1;
 
                 // Tipo de barricada
@@ -1745,6 +1809,17 @@
                 }
             });
 
+            // Calcular taxa de recolocação CORRETAMENTE
+            // Fórmula: (totalEnderecosUnicos / (totalRemocoesGlobal/4)) * 100
+            const taxaRecolocacao = totalRemocoesGlobal > 0 
+                ? ((totalEnderecosUnicos / totalRemocoesGlobal) * 100).toFixed(1)
+                : 0;
+
+            console.log('Cálculo da taxa de recolocação:');
+            console.log(`- Total de endereços únicos (recolocados): ${totalEnderecosUnicos}`);
+            console.log(`- Total de remoções: ${(totalRemocoesGlobal/4)}`);
+            console.log(`- Taxa de recolocação: ${taxaRecolocacao}%`);
+
             denunciasData = {
                 denuncias: denuncias,
                 total: total,
@@ -1763,13 +1838,15 @@
                 // Novas métricas
                 totalEnderecosUnicos: totalEnderecosUnicos,
                 totalEnderecosReincidentes: totalEnderecosReincidentes,
-                totalRegistrosAfetados: totalRegistrosAfetados
+                totalRegistrosAfetados: totalRegistrosAfetados,
+                totalRemocoesGlobal: totalRemocoesGlobal,
+                taxaRecolocacao: taxaRecolocacao
             };
 
             // Popular filtro de cidades
             const cidadeSelect = document.getElementById('cidadeFilter');
             cidadeSelect.innerHTML = '<option value="">Todas as Cidades</option>';
-            Object.keys(cidadeCounts).sort().forEach(cidade => {
+            Object.keys(cidadeCounts).filter(c => c && c !== 'Desconhecida').sort().forEach(cidade => {
                 const option = document.createElement('option');
                 option.value = cidade;
                 option.textContent = cidade;
@@ -1780,7 +1857,7 @@
         function renderDenunciasDashboard() {
             const cidade = document.getElementById('cidadeFilter').value;
             const filteredData = cidade ? 
-                denunciasData.denuncias.filter(d => d['Cidade'] === cidade) : 
+                denunciasData.denuncias.filter(d => (d['Cidade'] || '') === cidade) : 
                 denunciasData.denuncias;
             
             const total = filteredData.length;
@@ -1860,6 +1937,11 @@
                 }
             });
 
+            // Calcular taxa de recolocação para dados filtrados
+            const taxaRecolocacaoFiltrada = denunciasData.totalRemocoesGlobal > 0 
+                ? ((totalEnderecosUnicosFiltrados / (denunciasData.totalRemocoesGlobal/4)) * 100).toFixed(1)
+                : 0;
+
             // Atualizar estatísticas
             const statsGrid = document.getElementById('denunciaStatsGrid');
             const fixasPct = total > 0 ? ((fixas / total) * 100).toFixed(1) : 0;
@@ -1869,7 +1951,7 @@
                 <div class="denuncia-card">
                     <div class="denuncia-card-header">📋 Total de Denúncias</div>
                     <div class="denuncia-card-value">${total}</div>
-                    <div class="stat-change neutral">Registros processados</div>
+                    <div class="stat-change neutral">Ocorrências de Recolocação</div>
                 </div>
                 
                 <div class="denuncia-card">
@@ -1895,19 +1977,27 @@
                 </div>
                 
                 <div class="denuncia-card" onclick="showDuplicatesModal()" style="cursor: pointer; transition: transform 0.2s;">
-                    <div class="denuncia-card-header">🔄 Registros Duplicados</div>
-                    <div class="denuncia-card-value">${totalEnderecosReincidentesFiltrados}</div>
-                    <div class="stat-change negative">${totalRegistrosAfetadosFiltrados} registros afetados</div>
+                    <div class="denuncia-card-header">🔄 Resumo das Recolocações</div>
                     <div class="duplicate-metrics">
-                        <div class="duplicate-metric">Endereços únicos: <strong>${totalEnderecosUnicosFiltrados}</strong></div>
-                        <div class="duplicate-metric">Endereços com reincidência: <strong>${totalEnderecosReincidentesFiltrados}</strong></div>
-                        <div class="duplicate-metric">Total de registros afetados: <strong>${totalRegistrosAfetadosFiltrados}</strong></div>
+                        <div class="duplicate-metric">Barricadas Recolocadas: <strong>${totalEnderecosUnicosFiltrados}</strong></div>
+                        <div class="duplicate-metric">Logradouros Repetidos: <strong>${totalEnderecosReincidentesFiltrados}</strong></div>
+                        <div class="duplicate-metric">Denunciadas mais de 1 vez: <strong>${totalRegistrosAfetadosFiltrados}</strong></div>
+                        <div class="duplicate-metric" style="color: var(--danger); font-weight: 700;">Taxa de Recolocação: <strong>${taxaRecolocacaoFiltrada}%</strong></div>
                     </div>
                     <button class="btn" style="margin-top: 1rem; width: 100%;">Ver Detalhes</button>
                 </div>
                 
                 <div class="denuncia-card">
-                    <div class="denuncia-card-header">🏗️ Top Materiais</div>
+                    <div class="denuncia-card-header">📊 Dados de Remoção</div>
+                    <div class="duplicate-metrics">
+                        <div class="duplicate-metric">Total de Remoções: <strong>${(denunciasData.totalRemocoesGlobal/4)}</strong></div>
+                        <div class="duplicate-metric">Taxa de Recolocação Global: <strong>${denunciasData.taxaRecolocacao}%</strong></div>
+                        <div class="duplicate-metric">Eficiência Operacional: <strong>${(100 - parseFloat(denunciasData.taxaRecolocacao)).toFixed(1)}%</strong></div>
+                    </div>
+                </div>
+                
+                <div class="denuncia-card">
+                    <div class="denuncia-card-header">🏗️ Materiais Denunciados</div>
                     <div class="denuncia-list">
                         ${topMateriais.map(([mat, count], idx) => `
                             <div class="denuncia-item">
@@ -1953,7 +2043,7 @@
             // Gráfico de cidades
             const cidadeCounts = {};
             data.forEach(item => {
-                const cidade = item['Cidade'] || 'Desconhecida';
+                const cidade = item['Cidade'] || '';
                 cidadeCounts[cidade] = (cidadeCounts[cidade] || 0) + 1;
             });
 
@@ -2020,34 +2110,43 @@
             if (tipoBarricadaChart) tipoBarricadaChart.destroy();
             
             tipoBarricadaChart = new Chart(ctx2, {
-                type: 'pie',
+                type: 'bar',
                 data: {
                     labels: tiposData.map(t => t[0]),
                     datasets: [{
+                        label: 'Quantidade',
                         data: tiposData.map(t => t[1]),
-                        backgroundColor: [
-                            'rgba(59, 130, 246, 0.8)',
-                            'rgba(16, 185, 129, 0.8)',
-                            'rgba(239, 68, 68, 0.8)',
-                            'rgba(245, 158, 11, 0.8)',
-                            'rgba(139, 92, 246, 0.8)',
-                            'rgba(14, 165, 233, 0.8)'
-                        ],
-                        borderColor: 'var(--surface)',
-                        borderWidth: 2
+                        backgroundColor: 'rgba(59, 130, 246, 0.6)',
+                        borderColor: 'rgba(59, 130, 246, 1)',
+                        borderWidth: 2,
+                        borderRadius: 8
                     }]
                 },
                 options: {
+                    indexAxis: 'y',
                     responsive: true,
                     maintainAspectRatio: true,
                     plugins: {
                         legend: {
-                            position: 'right',
-                            labels: {
-                                color: '#f1f5f9',
-                                font: {
-                                    size: 11
-                                }
+                            display: false
+                        }
+                    },
+                    scales: {
+                        x: {
+                            beginAtZero: true,
+                            grid: {
+                                color: 'rgba(51, 65, 85, 0.5)'
+                            },
+                            ticks: {
+                                color: '#94a3b8'
+                            }
+                        },
+                        y: {
+                            grid: {
+                                display: false
+                            },
+                            ticks: {
+                                color: '#94a3b8'
                             }
                         }
                     }
@@ -2087,13 +2186,13 @@
             
             // Filtrar dados novamente para garantir consistência com o dashboard
             const filteredData = cidade ? 
-                denunciasData.denuncias.filter(d => d['Cidade'] === cidade) : 
+                denunciasData.denuncias.filter(d => (d['Cidade'] || '') === cidade) : 
                 denunciasData.denuncias;
 
             const currentDuplicateMap = new Map();
             filteredData.forEach(item => {
                 const endereco = (item['Endereço'] || '').toString().trim().toUpperCase();
-                if (endereco && endereco !== 'NI') {
+                if (endereco && endereco.toUpperCase() !== 'NI') {
                     if (!currentDuplicateMap.has(endereco)) {
                         currentDuplicateMap.set(endereco, []);
                     }
@@ -2116,15 +2215,19 @@
             } else {
                 container.innerHTML = duplicates.map(dup => {
                     // Extrair os números de DD de cada item
-                    const numerosDD = dup.items.map(item => item['N° DD'] || 'N/A').join(', ');
+                    const numerosDD = dup.items.map(item => item['N° DD'] || item['Nº DD'] || 'N/A').join(', ');
+                    const enderecoLimpo = limparTextoParaPDF(dup.endereco);
+                    
                     return `
                         <div style="background: var(--surface-light); padding: 1.5rem; border-radius: 12px; border-left: 4px solid var(--danger);">
-                            <div style="font-weight: 700; color: var(--text); margin-bottom: 0.5rem; font-size: 1.1rem;">📍 ${dup.endereco}</div>
-                            <div style="color: var(--text-muted); font-size: 0.9rem; margin-bottom: 0.8rem;">
-                                <strong>Ocorrências:</strong> ${dup.items.length} denúncias neste endereço
+                            <div style="font-weight: 700; color: var(--text); margin-bottom: 0.5rem; font-size: 1.1rem;">📍 ${enderecoLimpo}</div>
+                            <div style="color: var(--text-muted); font-size: 0.95rem; margin-bottom: 0.8rem; display: flex; flex-direction: column; gap: 4px;">
+                                <span><strong>Localidade:</strong> ${dup.items[0]['Localidade'] || 'N/A'}</span>
+                                <span><strong>Cidade:</strong> ${dup.items[0]['Cidade'] || 'N/A'}</span>
+                                <span><strong>Ocorrências:</strong> ${dup.items.length} denúncias neste endereço</span>
                             </div>
                             <div style="background: rgba(0,0,0,0.2); padding: 1rem; border-radius: 8px;">
-                                <div style="font-size: 0.8rem; text-transform: uppercase; color: var(--accent); font-weight: 700; margin-bottom: 0.5rem;">Números de DD Relacionados:</div>
+                                <div style="font-size: 0.8rem; text-transform: uppercase; color: var(--accent); font-weight: 700; margin-bottom: 0.5rem;">Números de Registro que Fazem Menção ao Mesmo Endereço:</div>
                                 <div style="font-family: 'Space Mono', monospace; color: var(--text); word-break: break-all;">${numerosDD}</div>
                             </div>
                         </div>
@@ -2139,6 +2242,311 @@
             document.getElementById('duplicatesModal').style.display = 'none';
         }
 
+        // Função para limpar texto para PDF (resolve problema de caracteres)
+        function limparTextoParaPDF(texto) {
+            if (!texto) return '';
+            
+            // Substituir caracteres problemáticos
+            const mapaSubstituicao = {
+                'á': 'a', 'à': 'a', 'ã': 'a', 'â': 'a', 'ä': 'a',
+                'é': 'e', 'è': 'e', 'ê': 'e', 'ë': 'e',
+                'í': 'i', 'ì': 'i', 'î': 'i', 'ï': 'i',
+                'ó': 'o', 'ò': 'o', 'õ': 'o', 'ô': 'o', 'ö': 'o',
+                'ú': 'u', 'ù': 'u', 'û': 'u', 'ü': 'u',
+                'ç': 'c',
+                'Á': 'A', 'À': 'A', 'Ã': 'A', 'Â': 'A', 'Ä': 'A',
+                'É': 'E', 'È': 'E', 'Ê': 'E', 'Ë': 'E',
+                'Í': 'I', 'Ì': 'I', 'Î': 'I', 'Ï': 'I',
+                'Ó': 'O', 'Ò': 'O', 'Õ': 'O', 'Ô': 'O', 'Ö': 'O',
+                'Ú': 'U', 'Ù': 'U', 'Û': 'U', 'Ü': 'U',
+                'Ç': 'C',
+                'º': '°', 'ª': 'a',
+                '–': '-', '—': '-',
+                '"': '"', "'": "'",
+                '…': '...', '•': '*'
+            };
+            
+            let textoLimpo = '';
+            for (let i = 0; i < texto.length; i++) {
+                const char = texto[i];
+                textoLimpo += mapaSubstituicao[char] || char;
+            }
+            
+            return textoLimpo;
+        }
+
+        function generateRecolocacoesPDF() {
+            const { jsPDF } = window.jspdf;
+            const pdf = new jsPDF({ 
+                orientation: 'portrait', 
+                unit: 'mm', 
+                format: 'a4',
+                compress: true
+            });
+            
+            const pageWidth = pdf.internal.pageSize.getWidth();
+            const margin = 15;
+            let y = margin;
+            
+            // Configurar fonte padrão (Helvetica suporta caracteres latinos básicos)
+            pdf.setFont('helvetica');
+            
+            // Título
+            pdf.setFontSize(16);
+            pdf.setFont(undefined, 'bold');
+            pdf.setTextColor(59, 130, 246); // Azul
+            pdf.text('RELATÓRIO DE RECOLOCAÇÕES DE BARRICADAS', pageWidth / 2, y, { align: 'center' });
+            y += 8;
+            
+            // Subtítulo com informações de filtro
+            pdf.setFontSize(10);
+            pdf.setFont(undefined, 'normal');
+            pdf.setTextColor(100, 100, 100);
+            
+            const cidadeFiltro = document.getElementById('cidadeFilter').value || 'Todas as Cidades';
+            const dataAtual = new Date().toLocaleDateString('pt-BR');
+            const horaAtual = new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+            
+            pdf.text(`Filtro aplicado: ${limparTextoParaPDF(cidadeFiltro)}`, pageWidth / 2, y, { align: 'center' });
+            y += 5;
+            pdf.text(`Gerado em: ${dataAtual} às ${horaAtual}`, pageWidth / 2, y, { align: 'center' });
+            y += 12;
+            
+            // Obter dados filtrados
+            const cidade = document.getElementById('cidadeFilter').value;
+            const filteredData = cidade ? 
+                denunciasData.denuncias.filter(d => (d['Cidade'] || '') === cidade) : 
+                denunciasData.denuncias;
+
+            const currentDuplicateMap = new Map();
+            filteredData.forEach(item => {
+                const endereco = (item['Endereço'] || '').toString().trim();
+                if (endereco && endereco.toUpperCase() !== 'NI' && endereco !== '') {
+                    if (!currentDuplicateMap.has(endereco)) {
+                        currentDuplicateMap.set(endereco, []);
+                    }
+                    currentDuplicateMap.get(endereco).push(item);
+                }
+            });
+
+            const duplicates = [];
+            currentDuplicateMap.forEach((items, endereco) => {
+                if (items.length > 1) {
+                    duplicates.push({ 
+                        endereco: limparTextoParaPDF(endereco),
+                        items,
+                        localidade: limparTextoParaPDF(items[0]['Localidade'] || ''),
+                        cidade: limparTextoParaPDF(items[0]['Cidade'] || ''),
+                        count: items.length
+                    });
+                }
+            });
+
+            // Ordenar por número de ocorrências
+            duplicates.sort((a, b) => b.count - a.count);
+
+            // Calcular métricas para o PDF
+            const totalEnderecosUnicos = Array.from(currentDuplicateMap.keys()).length;
+            const totalEnderecosReincidentes = duplicates.length;
+            const totalRegistrosAfetados = duplicates.reduce((sum, dup) => sum + dup.count, 0);
+            const totalDenuncias = filteredData.length;
+            
+            // Calcular taxa de recolocação para dados filtrados
+            const taxaRecolocacaoFiltrada = denunciasData.totalRemocoesGlobal > 0 
+                ? ((totalEnderecosUnicos / (denunciasData.totalRemocoesGlobal/4)) * 100).toFixed(1)
+                : 0;
+
+            // Seção de resumo com taxa de recolocação
+            pdf.setFontSize(12);
+            pdf.setFont(undefined, 'bold');
+            pdf.setTextColor(30, 30, 30);
+            pdf.text('RESUMO ESTATÍSTICO E TAXA DE RECOLOCAÇÃO', margin, y);
+            y += 8;
+            
+            pdf.setFontSize(10);
+            pdf.setFont(undefined, 'normal');
+            
+            const stats = [
+                `Total de denúncias analisadas: ${totalDenuncias}`,
+                `Total de remoções: ${(denunciasData.totalRemocoesGlobal/4)}`,
+                `Endereços únicos com barricadas recolocadas: ${totalEnderecosUnicos}`,
+                `Endereços com recolocação (duplicados): ${totalEnderecosReincidentes}`,
+                `Endereços com mais de uma denúncia: ${totalRegistrosAfetados}`,
+                `Taxa de recolocação: ${taxaRecolocacaoFiltrada}% (${totalEnderecosUnicos}/${(denunciasData.totalRemocoesGlobal/4)})`,
+                `Eficiência operacional: ${(100 - parseFloat(taxaRecolocacaoFiltrada)).toFixed(1)}%`
+            ];
+            
+            stats.forEach(stat => {
+                pdf.text(`• ${limparTextoParaPDF(stat)}`, margin, y);
+                y += 6;
+            });
+            
+            y += 10;
+            
+            // Seção de endereços duplicados
+            if (duplicates.length > 0) {
+                pdf.setFontSize(12);
+                pdf.setFont(undefined, 'bold');
+                pdf.setTextColor(239, 68, 68); // Vermelho para alerta
+                pdf.text(`ENDEREÇOS DUPLICADOS COM DENÚNCIAS DE RECOLOCAÇÃO DE BARRICADAS(${duplicates.length})`, margin, y);
+                y += 8;
+                
+                pdf.setFontSize(10);
+                pdf.setFont(undefined, 'normal');
+                pdf.setTextColor(80, 80, 80);
+                
+                // Adicionar legenda
+                pdf.text('Os endereços abaixo apresentam múltiplas denúncias, indicando recolocação de barricadas após remoção:', margin, y);
+                y += 6;
+                
+                duplicates.forEach((dup, index) => {
+                    // Verificar se precisa de nova página
+                    if (y > 250) {
+                        pdf.addPage();
+                        y = margin;
+                        pdf.setFontSize(10);
+                    }
+                    
+                    // Título do endereço
+                    pdf.setFont(undefined, 'bold');
+                    pdf.setTextColor(30, 30, 30);
+                    pdf.text(`${index + 1}. ${dup.endereco}`, margin, y);
+                    y += 5;
+                    
+                    // Informações do endereço
+                    pdf.setFont(undefined, 'normal');
+                    pdf.setTextColor(100, 100, 100);
+                    
+                    const localInfo = [];
+                    if (dup.localidade && dup.localidade.trim() !== '') {
+                        localInfo.push(`Localidade: ${dup.localidade}`);
+                    }
+                    if (dup.cidade && dup.cidade.trim() !== '') {
+                        localInfo.push(`Cidade: ${dup.cidade}`);
+                    }
+                    localInfo.push(`Ocorrências: ${dup.count}`);
+                    
+                    pdf.text(localInfo.join(' | '), margin, y);
+                    y += 5;
+                    
+                    // Números de registro
+                    const numerosDD = dup.items.map(item => item['N° DD'] || item['Nº DD'] || 'N/A').filter(n => n !== 'N/A');
+                    if (numerosDD.length > 0) {
+                        pdf.setTextColor(59, 130, 246); // Azul
+                        pdf.setFont(undefined, 'bold');
+                        pdf.text('Registros relacionados:', margin, y);
+                        y += 4;
+                        
+                        pdf.setFont(undefined, 'normal');
+                        pdf.setTextColor(80, 80, 80);
+                        
+                        // Dividir os números de registro em linhas se for muito longo
+                        const registrosText = numerosDD.join(', ');
+                        const maxCharsPerLine = 80;
+                        
+                        if (registrosText.length <= maxCharsPerLine) {
+                            pdf.text(registrosText, margin + 5, y);
+                            y += 4;
+                        } else {
+                            // Quebrar o texto em várias linhas
+                            let start = 0;
+                            while (start < registrosText.length) {
+                                let end = start + maxCharsPerLine;
+                                if (end < registrosText.length) {
+                                    // Encontrar o último espaço antes do limite
+                                    while (end > start && registrosText[end] !== ' ' && registrosText[end] !== ',') {
+                                        end--;
+                                    }
+                                    if (end === start) {
+                                        end = start + maxCharsPerLine; // Forçar quebra
+                                    }
+                                } else {
+                                    end = registrosText.length;
+                                }
+                                
+                                const linha = registrosText.substring(start, end).trim();
+                                if (linha) {
+                                    pdf.text(linha, margin + 5, y);
+                                    y += 4;
+                                }
+                                start = end;
+                            }
+                        }
+                    }
+                    
+                    y += 8; // Espaço entre itens
+                    
+                    // Linha divisória
+                    if (index < duplicates.length - 1) {
+                        pdf.setDrawColor(200, 200, 200);
+                        pdf.line(margin, y - 2, pageWidth - margin, y - 2);
+                        y += 4;
+                    }
+                });
+            } else {
+                pdf.setFontSize(11);
+                pdf.setTextColor(100, 100, 100);
+                pdf.text('Nenhum endereço com recolocação identificado para os filtros atuais.', margin, y);
+                y += 8;
+            }
+            
+            // Seção de análise da taxa de recolocação
+            y += 5;
+            pdf.setFontSize(12);
+            pdf.setFont(undefined, 'bold');
+            pdf.setTextColor(30, 30, 30);
+            pdf.text('ANÁLISE DA TAXA DE RECOLOCAÇÃO', margin, y);
+            y += 8;
+            
+            pdf.setFontSize(10);
+            pdf.setFont(undefined, 'normal');
+            
+            const analiseText = `
+A taxa de recolocação de ${taxaRecolocacaoFiltrada}% indica que, para cada 100 barricadas removidas, aproximadamente ${parseFloat(taxaRecolocacaoFiltrada).toFixed(0)} são recolocadas.
+
+Esta métrica é calculada comparando:
+• Volume total de barricadas removidas (coluna "REMOÇÕES", índice 5 da aba GLOBAL): ${(denunciasData.totalRemocoesGlobal/4)}
+• Endereços únicos com recolocação (aba Recolocação.DD): ${totalEnderecosUnicos}
+
+Fórmula: (Endereços Únicos Recolocados ÷ Total de Remoções) × 100
+
+Interpretação:
+• Taxa abaixo de 10%: Excelente eficiência operacional
+• Taxa entre 10-30%: Eficiência moderada
+• Taxa acima de 30%: Necessidade de revisão estratégica
+            `;
+            
+            const linhasAnalise = analiseText.split('\n');
+            linhasAnalise.forEach(linha => {
+                if (linha.trim()) {
+                    pdf.text(linha.trim(), margin, y);
+                    y += 6;
+                }
+            });
+            
+            // Adicionar rodapé em todas as páginas
+            const pageCount = pdf.internal.getNumberOfPages();
+            for (let i = 1; i <= pageCount; i++) {
+                pdf.setPage(i);
+                pdf.setFontSize(8);
+                pdf.setTextColor(150, 150, 150);
+                pdf.text(`Página ${i} de ${pageCount}`, pageWidth - margin, pdf.internal.pageSize.getHeight() - 10, { align: 'right' });
+                pdf.text('Operação Barricada Zero - Sistema Integrado de Análise Operacional', margin, pdf.internal.pageSize.getHeight() - 10);
+            }
+            
+            // Abrir o PDF em uma nova aba
+            const pdfDataUrl = pdf.output('datauristring');
+            currentPDFDataUrl = pdfDataUrl;
+            
+            // Criar um blob URL para abrir em nova aba
+            const pdfBlob = pdf.output('blob');
+            const blobUrl = URL.createObjectURL(pdfBlob);
+            window.open(blobUrl, '_blank');
+            
+            // Limpar o blob URL após um tempo
+            setTimeout(() => URL.revokeObjectURL(blobUrl), 1000);
+        }
+
         function closePdfPreview() {
             document.getElementById('pdfPreviewModal').style.display = 'none';
             document.getElementById('pdfPreviewIframe').src = '';
@@ -2148,7 +2556,7 @@
             if (currentPDFDataUrl) {
                 const link = document.createElement('a');
                 link.href = currentPDFDataUrl;
-                link.download = `relatorio_denuncias_${new Date().toISOString().split('T')[0]}.pdf`;
+                link.download = `relatorio_recolocacoes_${new Date().toISOString().split('T')[0]}.pdf`;
                 document.body.appendChild(link);
                 link.click();
                 document.body.removeChild(link);
@@ -2186,7 +2594,7 @@
             // Calcular estatísticas para o PDF
             const cidade = document.getElementById('cidadeFilter').value;
             const filteredData = cidade ? 
-                denunciasData.denuncias.filter(d => d['Cidade'] === cidade) : 
+                denunciasData.denuncias.filter(d => (d['Cidade'] || '') === cidade) : 
                 denunciasData.denuncias;
             
             const total = filteredData.length;
@@ -2220,12 +2628,20 @@
                 }
             });
 
+            // Calcular taxa de recolocação para o PDF
+            const taxaRecolocacaoFiltrada = denunciasData.totalRemocoesGlobal > 0 
+                ? ((totalEnderecosUnicosFiltrados / denunciasData.totalRemocoesGlobal) * 100).toFixed(1)
+                : 0;
+
             const insights = [
                 `Total de denúncias analisadas: ${total}`,
+                `Total de remoções: ${(denunciasData.totalRemocoesGlobal/4)}`,
                 `Total de endereços únicos (barricadas recolocadas): ${totalEnderecosUnicosFiltrados}`,
-                `Endereços com reincidência (mencionados mais de uma vez): ${totalEnderecosReincidentesFiltrados}`,
-                `Total de registros afetados por reincidência: ${totalRegistrosAfetadosFiltrados}`,
-                `A rápida recolocação após remoções policiais destaca a resiliência das estruturas criminosas e a necessidade de estratégias mais sustentáveis de intervenção.`
+                `Endereços duplicados: ${totalEnderecosReincidentesFiltrados}`,
+                `Total de endereços mencionados mais de uma vez: ${totalRegistrosAfetadosFiltrados}`,
+                `Taxa de recolocação: ${taxaRecolocacaoFiltrada}%`,
+                `Eficiência operacional: ${(100 - parseFloat(taxaRecolocacaoFiltrada)).toFixed(1)}%`,
+                `A taxa de recolocação indica a eficácia das operações de remoção.`
             ];
 
             insights.forEach(insight => {
@@ -2251,7 +2667,7 @@
                 currentDuplicateMap.forEach((items, endereco) => {
                     if (items.length > 1 && endereco && endereco !== 'NI') {
                         const numerosDD = items.map(item => item['N° DD'] || 'N/A').join(', ');
-                        duplicatesList.push([endereco, items.length, numerosDD]);
+                        duplicatesList.push([limparTextoParaPDF(endereco), items.length, limparTextoParaPDF(numerosDD)]);
                     }
                 });
 
@@ -2259,7 +2675,7 @@
 
                 pdf.autoTable({
                     startY: y,
-                    head: [['Endereço', 'Ocorrências', 'Números de DD']],
+                    head: [['Endereço', 'Ocorrências', 'Números de Registro']],
                     body: duplicatesList.slice(0, 15),
                     theme: 'grid',
                     headStyles: { fillColor: [239, 68, 68], textColor: 255 },
@@ -2300,7 +2716,7 @@
                 .sort((a, b) => b[1] - a[1])
                 .slice(0, 10);
                 
-            const matTable = mats.map(([mat, cnt], i) => [i+1, mat, cnt]);
+            const matTable = mats.map(([mat, cnt], i) => [i+1, limparTextoParaPDF(mat), cnt]);
             pdf.autoTable({
                 startY: y,
                 head: [['Posição', 'Material', 'Ocorrências']],
@@ -2313,7 +2729,7 @@
             });
 
             pdf.setFontSize(10);
-            pdf.text('Relatório gerado automaticamente a partir da planilha importada.', margin, pdf.internal.pageSize.getHeight() - 10);
+            pdf.text('Relatório gerado com base nos dados da planilha-base.', margin, pdf.internal.pageSize.getHeight() - 10);
 
             return pdf;
         }
