@@ -1812,7 +1812,7 @@
             // Calcular taxa de recolocação CORRETAMENTE
             // Fórmula: (totalEnderecosUnicos / (totalRemocoesGlobal/4)) * 100
             const taxaRecolocacao = totalRemocoesGlobal > 0 
-                ? ((totalEnderecosUnicos / totalRemocoesGlobal) * 100).toFixed(1)
+                ? ((totalEnderecosUnicos / (totalRemocoesGlobal/4)) * 100).toFixed(1)
                 : 0;
 
             console.log('Cálculo da taxa de recolocação:');
@@ -1942,6 +1942,9 @@
                 ? ((totalEnderecosUnicosFiltrados / (denunciasData.totalRemocoesGlobal/4)) * 100).toFixed(1)
                 : 0;
 
+            // Calcular eficiência operacional (100% - taxa de recolocação)
+            const eficienciaOperacional = (100 - parseFloat(taxaRecolocacaoFiltrada)).toFixed(1);
+
             // Atualizar estatísticas
             const statsGrid = document.getElementById('denunciaStatsGrid');
             const fixasPct = total > 0 ? ((fixas / total) * 100).toFixed(1) : 0;
@@ -1991,8 +1994,8 @@
                     <div class="denuncia-card-header">📊 Dados de Remoção</div>
                     <div class="duplicate-metrics">
                         <div class="duplicate-metric">Total de Remoções: <strong>${(denunciasData.totalRemocoesGlobal/4)}</strong></div>
-                        <div class="duplicate-metric">Taxa de Recolocação Global: <strong>${denunciasData.taxaRecolocacao}%</strong></div>
-                        <div class="duplicate-metric">Eficiência Operacional: <strong>${(100 - parseFloat(denunciasData.taxaRecolocacao)).toFixed(1)}%</strong></div>
+                        <div class="duplicate-metric" style="color: var(--danger); font-weight: 700;">Taxa de Recolocação: <strong>${taxaRecolocacaoFiltrada}%</strong></div>
+                        <div class="duplicate-metric" style="color: var(--success); font-weight: 700;">Eficiência Operacional: <strong>${eficienciaOperacional}%</strong></div>
                     </div>
                 </div>
                 
@@ -2356,6 +2359,9 @@
                 ? ((totalEnderecosUnicos / (denunciasData.totalRemocoesGlobal/4)) * 100).toFixed(1)
                 : 0;
 
+            // Calcular eficiência operacional
+            const eficienciaOperacional = (100 - parseFloat(taxaRecolocacaoFiltrada)).toFixed(1);
+
             // Seção de resumo com taxa de recolocação
             pdf.setFontSize(12);
             pdf.setFont(undefined, 'bold');
@@ -2373,7 +2379,7 @@
                 `Endereços com recolocação (duplicados): ${totalEnderecosReincidentes}`,
                 `Endereços com mais de uma denúncia: ${totalRegistrosAfetados}`,
                 `Taxa de recolocação: ${taxaRecolocacaoFiltrada}% (${totalEnderecosUnicos}/${(denunciasData.totalRemocoesGlobal/4)})`,
-                `Eficiência operacional: ${(100 - parseFloat(taxaRecolocacaoFiltrada)).toFixed(1)}%`
+                `Eficiência operacional: ${eficienciaOperacional}%`
             ];
             
             stats.forEach(stat => {
@@ -2514,6 +2520,8 @@ Interpretação:
 • Taxa abaixo de 10%: Excelente eficiência operacional
 • Taxa entre 10-30%: Eficiência moderada
 • Taxa acima de 30%: Necessidade de revisão estratégica
+
+Eficiência Operacional: ${eficienciaOperacional}%
             `;
             
             const linhasAnalise = analiseText.split('\n');
@@ -2628,10 +2636,13 @@ Interpretação:
                 }
             });
 
-            // Calcular taxa de recolocação para o PDF
+            // Calcular taxa de recolocação para o PDF (mesma fórmula usada no dashboard)
             const taxaRecolocacaoFiltrada = denunciasData.totalRemocoesGlobal > 0 
-                ? ((totalEnderecosUnicosFiltrados / denunciasData.totalRemocoesGlobal) * 100).toFixed(1)
+                ? ((totalEnderecosUnicosFiltrados / (denunciasData.totalRemocoesGlobal/4)) * 100).toFixed(1)
                 : 0;
+
+            // Calcular eficiência operacional
+            const eficienciaOperacional = (100 - parseFloat(taxaRecolocacaoFiltrada)).toFixed(1);
 
             const insights = [
                 `Total de denúncias analisadas: ${total}`,
@@ -2640,7 +2651,7 @@ Interpretação:
                 `Endereços duplicados: ${totalEnderecosReincidentesFiltrados}`,
                 `Total de endereços mencionados mais de uma vez: ${totalRegistrosAfetadosFiltrados}`,
                 `Taxa de recolocação: ${taxaRecolocacaoFiltrada}%`,
-                `Eficiência operacional: ${(100 - parseFloat(taxaRecolocacaoFiltrada)).toFixed(1)}%`,
+                `Eficiência operacional: ${eficienciaOperacional}%`,
                 `A taxa de recolocação indica a eficácia das operações de remoção.`
             ];
 
